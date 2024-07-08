@@ -40,7 +40,8 @@ func Execute() {
 
 	var template []byte
 	var input []byte
-	var err error
+
+	var useCaseAdded = false
 
 	var rootCmd = &cobra.Command{
 		Use:   "grog",
@@ -48,35 +49,20 @@ func Execute() {
 		Long:  `A Fast and Flexible .net code Generator built with love by aleluis in Go.`,
 		Run: func(cmd *cobra.Command, args []string) {
 
-			fmt.Print("🙈 Name of project*: ")
+			fmt.Print("🙈 Namespace* (e.g. myapp): ")
 			reader := bufio.NewReader(os.Stdin)
 			project, _ := reader.ReadString('\n')
 			project = strings.TrimRight(project, "\r\n")
 
-			fmt.Print("🙉 Name of the Controller*: ")
+			fmt.Print("🙉 Controller* (e.g. Home): ")
 			reader = bufio.NewReader(os.Stdin)
 			name, _ := reader.ReadString('\n')
 			name = strings.TrimRight(name, "\r\n")
 
-			fmt.Print("🙊 Name of use case (empty to skip): ")
+			fmt.Print("🙊 Use case - empty to skip (e.g. GetPerson): ")
 			reader = bufio.NewReader(os.Stdin)
 			useCase, _ := reader.ReadString('\n')
 			useCase = strings.TrimRight(useCase, "\r\n")
-
-			// Program add Services
-			if isFileExist("./Program.cs") {
-				input, err = os.ReadFile("Program.cs")
-				check(err)
-
-				template = []byte(ProgramTpl(name, useCase))
-
-				output := bytes.Replace(input, []byte("// Add services to the container."), template, -1)
-
-				if err = os.WriteFile("./Program.cs", output, 0666); err != nil {
-					fmt.Println(err)
-					os.Exit(1)
-				}
-			}
 
 			// Controller
 
@@ -88,6 +74,7 @@ func Execute() {
 				d1 := []byte(ControllerTpl(name, project))
 				err = os.WriteFile("./Infrastructure/Controllers/"+name+"Controller.cs", d1, 0644)
 				check(err)
+				fmt.Println("✅ Controller.cs has been created")
 			}
 
 			// Use Case - if not empty
@@ -104,6 +91,7 @@ func Execute() {
 					template = []byte(InterfaceUseCaseTpl(useCase, project))
 					err = os.WriteFile("./Domain/Ports/Input/I"+useCase+"UseCase.cs", template, 0644)
 					check(err)
+					fmt.Println("✅ I" + useCase + "UseCase.cs has been created")
 				}
 
 				// Use Case
@@ -115,7 +103,9 @@ func Execute() {
 				if !isFileExist("./Application/UseCases/" + useCase + "UseCase.cs") {
 					template = []byte(UseCaseTpl(useCase, project))
 					err = os.WriteFile("./Application/UseCases/"+useCase+"UseCase.cs", template, 0644)
+					useCaseAdded = true
 					check(err)
+					fmt.Println("✅ " + useCase + "UseCase.cs has been created")
 				}
 
 			}
@@ -130,6 +120,26 @@ func Execute() {
 				template = []byte(InterfaceServiceTpl(name, project, useCase))
 				err = os.WriteFile("./Domain/Ports/Input/I"+name+"Service.cs", template, 0644)
 				check(err)
+				fmt.Println("✅ I" + name + "Service.cs has been created")
+			} else {
+
+				if useCaseAdded {
+
+					input, err = os.ReadFile("./Domain/Ports/Input/I" + name + "Service.cs")
+					check(err)
+
+					template = []byte("public interface I" + name + "Service : I" + useCase + "UseCase,")
+
+					output := bytes.Replace(input, []byte("public interface I"+name+"Service :"), template, -1)
+
+					if err = os.WriteFile("./Domain/Ports/Input/I"+name+"Service.cs", output, 0666); err != nil {
+						fmt.Println(err)
+						os.Exit(1)
+					}
+
+					fmt.Println("✅ I" + name + "Service.cs has been updated")
+				}
+
 			}
 
 			// Service
@@ -142,6 +152,34 @@ func Execute() {
 				template = []byte(ServiceTpl(name, project, useCase))
 				err = os.WriteFile("./Application/Services/"+name+"Service.cs", template, 0644)
 				check(err)
+				fmt.Println("✅ " + name + "Service.cs has been created")
+			} else {
+				if useCaseAdded {
+					addUseCaseToExistingService(name, useCase)
+					fmt.Println("✅ " + name + "Service.cs has been updated")
+				}
+			}
+
+			// Program add Services
+			if isFileExist("./Program.cs") {
+
+				if useCaseAdded {
+
+					input, err = os.ReadFile("Program.cs")
+					check(err)
+
+					template = []byte(ProgramTpl(name, useCase))
+
+					output := bytes.Replace(input, []byte("// Add services to the container."), template, -1)
+
+					if err = os.WriteFile("./Program.cs", output, 0666); err != nil {
+						fmt.Println(err)
+						os.Exit(1)
+					}
+
+					fmt.Println("✅ Program.cs has been updated")
+				}
+
 			}
 
 			fmt.Println("🎉 Done!")
@@ -153,6 +191,55 @@ func Execute() {
 	//rootCmd.Flags().StringVarP(&proyecto, "proyecto", "p", "", "")
 
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func addUseCaseToExistingService(name string, useCase string) {
+
+	input, err := os.ReadFile("./Application/Services/" + name + "Service.cs")
+	check(err)
+
+	template := []byte("private I" + useCase + "UseCase _" + firstLetterToLower(useCase) + "UseCase;\n\n" + "\tpublic " + name + "Service(I" + useCase + "UseCase " + firstLetterToLower(useCase) + "UseCase, ")
+
+	output := bytes.Replace(input, []byte("public "+name+"Service("), template, -1)
+
+	if err = os.WriteFile("./Application/Services/"+name+"Service.cs", output, 0666); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	file, err := os.Open("./Application/Services/" + name + "Service.cs")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	nuevo := ""
+
+	encontro := false
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !encontro {
+			if strings.Contains(line, "public "+name+"Service(") {
+				nuevo = nuevo + line + "\n"
+				nuevo = nuevo + "\t{\n\t\t_" + firstLetterToLower(useCase) + "UseCase = " + firstLetterToLower(useCase) + "UseCase;\n"
+				encontro = true
+			} else {
+				nuevo = nuevo + line + "\n"
+			}
+		} else {
+			encontro = false
+		}
+	}
+
+	if err = os.WriteFile("./Application/Services/"+name+"Service.cs", []byte(nuevo), 0666); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
