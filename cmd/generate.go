@@ -42,6 +42,7 @@ func Execute() {
 	var input []byte
 
 	var useCaseAdded = false
+	var serviceAdded = false
 
 	var rootCmd = &cobra.Command{
 		Use:   "grog",
@@ -74,7 +75,7 @@ func Execute() {
 				d1 := []byte(ControllerTpl(name, project))
 				err = os.WriteFile("./Infrastructure/Controllers/"+name+"Controller.cs", d1, 0644)
 				check(err)
-				fmt.Println("✅ Controller.cs has been created")
+				fmt.Println("✅ " + name + "Controller.cs has been created")
 			}
 
 			// Use Case - if not empty
@@ -121,6 +122,7 @@ func Execute() {
 				err = os.WriteFile("./Domain/Ports/Input/I"+name+"Service.cs", template, 0644)
 				check(err)
 				fmt.Println("✅ I" + name + "Service.cs has been created")
+				serviceAdded = true
 			} else {
 
 				if useCaseAdded {
@@ -128,9 +130,15 @@ func Execute() {
 					input, err = os.ReadFile("./Domain/Ports/Input/I" + name + "Service.cs")
 					check(err)
 
-					template = []byte("public interface I" + name + "Service : I" + useCase + "UseCase,")
+					var output []byte
 
-					output := bytes.Replace(input, []byte("public interface I"+name+"Service :"), template, -1)
+					if bytes.Contains(input, []byte("public interface I"+name+"Service :")) {
+						template = []byte("public interface I" + name + "Service : I" + useCase + "UseCase,")
+						output = bytes.Replace(input, []byte("public interface I"+name+"Service :"), template, -1)
+					} else {
+						template = []byte("public interface I" + name + "Service : I" + useCase + "UseCase")
+						output = bytes.Replace(input, []byte("public interface I"+name+"Service"), template, -1)
+					}
 
 					if err = os.WriteFile("./Domain/Ports/Input/I"+name+"Service.cs", output, 0666); err != nil {
 						fmt.Println(err)
@@ -163,12 +171,12 @@ func Execute() {
 			// Program add Services
 			if isFileExist("./Program.cs") {
 
-				if useCaseAdded {
+				if useCaseAdded || useCase == "" {
 
 					input, err = os.ReadFile("Program.cs")
 					check(err)
 
-					template = []byte(ProgramTpl(name, useCase))
+					template = []byte(ProgramTpl(name, useCase, serviceAdded))
 
 					output := bytes.Replace(input, []byte("// Add services to the container."), template, -1)
 
@@ -200,10 +208,16 @@ func addUseCaseToExistingService(name string, useCase string) {
 
 	input, err := os.ReadFile("./Application/Services/" + name + "Service.cs")
 	check(err)
+	var template []byte
+	var output []byte
 
-	template := []byte("private I" + useCase + "UseCase _" + firstLetterToLower(useCase) + "UseCase;\n\n" + "\tpublic " + name + "Service(I" + useCase + "UseCase " + firstLetterToLower(useCase) + "UseCase, ")
-
-	output := bytes.Replace(input, []byte("public "+name+"Service("), template, -1)
+	if bytes.Contains(input, []byte("public "+name+"Service()")) {
+		template = []byte("private I" + useCase + "UseCase _" + firstLetterToLower(useCase) + "UseCase;\n\n" + "\tpublic " + name + "Service(I" + useCase + "UseCase " + firstLetterToLower(useCase) + "UseCase)")
+		output = bytes.Replace(input, []byte("public "+name+"Service()"), template, -1)
+	} else {
+		template = []byte("private I" + useCase + "UseCase _" + firstLetterToLower(useCase) + "UseCase;\n\n" + "\tpublic " + name + "Service(I" + useCase + "UseCase " + firstLetterToLower(useCase) + "UseCase, ")
+		output = bytes.Replace(input, []byte("public "+name+"Service("), template, -1)
+	}
 
 	if err = os.WriteFile("./Application/Services/"+name+"Service.cs", output, 0666); err != nil {
 		fmt.Println(err)
@@ -365,15 +379,25 @@ public interface I%[1]vUseCase
 	`, useCase, proyecto)
 }
 
-func ProgramTpl(name string, useCase string) string {
+func ProgramTpl(name string, useCase string, serviceAdded bool) string {
 
 	if useCase == "" {
-		return fmt.Sprintf(`// Add services to the container.
+		if serviceAdded {
+			return fmt.Sprintf(`// Add services to the container.
 builder.Services.AddScoped<I%[1]vService, %[1]vService>();`, name, useCase)
+		} else {
+			return ""
+		}
 	} else {
-		return fmt.Sprintf(`// Add services to the container.
+
+		if serviceAdded {
+			return fmt.Sprintf(`// Add services to the container.
 builder.Services.AddScoped<I%[2]vUseCase, %[2]vUseCase>();
 builder.Services.AddScoped<I%[1]vService, %[1]vService>();`, name, useCase)
+		} else {
+			return fmt.Sprintf(`// Add services to the container.
+builder.Services.AddScoped<I%[1]vUseCase, %[1]vUseCase>();`, useCase)
+		}
 	}
 
 }
